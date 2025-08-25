@@ -1,8 +1,0 @@
-When a section is selected, provide one single summary of the whole section and its subsection
-Basically, provide one single summary for each selected section of a given level.
-
-STEP 1:
-For each selected section, extract their text and that of their subsections, with their respective texts extracted in isolation.
-That means that for a given selected section, non categorized text will be parented to that section, and the text of each of its subsections will be parented to their respective subsections.
-
-{'Selected sections 1':("text", {'Subsection 1'; })}

@@ -1,5 +1,0 @@
-When a section is selected, provide one single summary of the whole section and its subsection
-Basically, provide one single summary for each selected section of a given level.
-
-STEP 1:
-Extract the text of each section  and there subsections. 
