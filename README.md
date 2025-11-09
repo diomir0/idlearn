@@ -1,8 +1,7 @@
 # README
 
-:warning: This project has been idle for quite some time and can be considered on pause until further notice. :warning:
-
-:warning: Also, it does not run (yet). :warning:
+:warning: This project has been idle for a while and will be until further notice. :warning:
+Also, it does not run (yet). 
 
 ## About
 idlearn is a free app that allows to generate concise summaries and question-answer flashcards from a given PDF or EPUB document. Using its graphical interface, feed it with the document of your choice, select the chapters or sections you want and let it help you with your learning!
