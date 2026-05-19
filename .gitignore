@@ -1,0 +1,36 @@
+# ===========================================
+# IDLEARN .gitignore
+# ===========================================
+
+# --- Archived / prototype scripts ----------
+old/
+
+# --- Python bytecode -----------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Jupyter notebook checkpoints ----------
+.ipynb_checkpoints/
+
+# --- IDE / editor settings -----------------
+.zed/
+.vscode/
+.idea/
+
+# --- Runtime cache and logs ----------------
+.cache/
+cache/
+logs/
+*.log
+
+# --- Test files ----------------------------
+test-file.pdf
+
+# --- OS metadata --------------------------
+.DS_Store
+Thumbs.db
+
+# --- Environment / secrets -----------------
+.env
+.env.*
