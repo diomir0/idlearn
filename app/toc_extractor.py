@@ -125,14 +125,76 @@ class TOCExtractor:
 
         return self._clean_and_sort_toc(toc_entries)
 
-    def extract_toc(self, path: str) -> List[TOCEntry]:
-        """Extract TOC from file"""
-        if path[-4:].lower() == ".pdf":
-            return self.extract_toc_from_pdf(path)
-        elif path[-5:].lower() == ".epub":
-            return self.extract_toc_from_epub(path)
+    def extract_toc_from_doc(self, doc: fitz.Document) -> List[TOCEntry]:
+        """Extract TOC from an already-opened PyMuPDF document"""
+        # Try built-in TOC first
+        built_in_toc = self._extract_builtin_toc(doc)
+        if built_in_toc:
+            return built_in_toc
+
+        # Use text analysis approach
+        toc_entries = []
+
+        # Analyze font characteristics across document
+        font_stats = self._analyze_font_characteristics(doc)
+
+        # Extract potential headings
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            blocks = page.get_text("dict")["blocks"]
+
+            for block in blocks:
+                if "lines" in block:
+                    for line in block["lines"]:
+                        for span in line["spans"]:
+                            text = span["text"].strip()
+                            if self._is_potential_heading(text, span, font_stats):
+                                level = self._determine_heading_level(
+                                    text, span, font_stats
+                                )
+                                toc_entries.append(
+                                    TOCEntry(
+                                        title=text,
+                                        level=level,
+                                        page=page_num + 1,
+                                        position=span["bbox"][1],  # y-coordinate
+                                    )
+                                )
+
+        return self._clean_and_sort_toc(toc_entries)
+
+    def extract_toc_from_doc_or_path(self, doc_or_path) -> List[TOCEntry]:
+        """Extract TOC from a PyMuPDF document object or a file path string"""
+        if isinstance(doc_or_path, fitz.Document):
+            return self.extract_toc_from_doc(doc_or_path)
+        elif isinstance(doc_or_path, str):
+            ext = doc_or_path[-5:].lower()
+            if ext.endswith(".pdf"):
+                return self.extract_toc_from_pdf(doc_or_path)
+            elif ext.endswith(".epub"):
+                return self.extract_toc_from_epub(doc_or_path)
+            else:
+                raise ValueError(f"Unsupported file type: {doc_or_path}")
         else:
-            raise ValueError(f"Unsupported file type: {path}")
+            raise TypeError(
+                f"Expected fitz.Document or str, got {type(doc_or_path).__name__}"
+            )
+
+    def extract_toc(self, path) -> List[TOCEntry]:
+        """Extract TOC from file path or document object"""
+        if isinstance(path, fitz.Document):
+            return self.extract_toc_from_doc(path)
+        elif isinstance(path, str):
+            if path[-4:].lower() == ".pdf":
+                return self.extract_toc_from_pdf(path)
+            elif path[-5:].lower() == ".epub":
+                return self.extract_toc_from_epub(path)
+            else:
+                raise ValueError(f"Unsupported file type: {path}")
+        else:
+            raise TypeError(
+                f"Expected fitz.Document or str, got {type(path).__name__}"
+            )
 
     def _extract_builtin_toc(self, doc) -> List[TOCEntry]:
         """Extract built-in TOC if available"""

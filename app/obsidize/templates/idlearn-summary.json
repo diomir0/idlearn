@@ -1,0 +1,46 @@
+{
+  "id": "idlearn-summary",
+  "description": "Comprehensive summary digest with figures and key concepts. Designed for multimodal summarization that captures all nuances of the original text.",
+  "name": "Summary Digest (IDLEARN)",
+  "behavior": "create",
+  "noteNameFormat": "{{title}} - Summary",
+  "path": "Summaries",
+  "noteContentFormat": "# {{title}}\n\n> [!info] Source\n> **Author**: {{author}}\n> **Pages**: {{pageCount}}\n> **Keywords**: {{keywords}}\n> **Source**: {{fileName}}\n\n{% if summaries %}\n## Comprehensive Summary\n\n{% for summary in summaries %}\n### {{summary.title}}\n\n{{summary.summary}}\n\n{% endfor %}\n{% endif %}\n{% if qa_pairs %}\n---\n\n## Self-Test Questions\n\n{% for qa in qa_pairs %}\n> [!question] {{qa.title}}\n> {{qa.qa}}\n\n{% endfor %}\n{% endif %}",
+  "properties": [
+    {
+      "name": "title",
+      "value": "{{title}}",
+      "type": "text"
+    },
+    {
+      "name": "author",
+      "value": "{{author}}",
+      "type": "text"
+    },
+    {
+      "name": "pages",
+      "value": "{{pageCount}}",
+      "type": "number"
+    },
+    {
+      "name": "keywords",
+      "value": "{{keywords}}",
+      "type": "multitext"
+    },
+    {
+      "name": "source",
+      "value": "{{filePath}}",
+      "type": "text"
+    },
+    {
+      "name": "type",
+      "value": "summary-digest",
+      "type": "text"
+    },
+    {
+      "name": "idlearn_processed",
+      "value": "true",
+      "type": "checkbox"
+    }
+  ]
+}

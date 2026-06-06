@@ -12,6 +12,7 @@
 # sections of the text and values to their associated text, using local quantized
 # version of the mistral-7B-Instruct LLM model run via ollama.
 
+import base64
 import os
 import re
 import subprocess
@@ -23,7 +24,7 @@ from .utils import IdlearnCache
 
 
 class LLMModel:
-    def __init__(self, model="mistral:7B-instruct", temperature=0.4,
+    def __init__(self, model="gemma4:31b:cloud", temperature=0.4,
                  api_type="ollama", base_url="https://ollama.com", api_key=None):
         self.model = model
         self.temperature = temperature
@@ -35,6 +36,10 @@ class LLMModel:
         else:  # openai
             self.base_url = base_url or "https://api.openai.com/v1"
 
+        # If no API key was provided, check the OLLAMA_API_KEY environment variable
+        # (required for Ollama Cloud at https://ollama.com/api)
+        if not api_key:
+            api_key = os.environ.get("OLLAMA_API_KEY")
         self.api_key = api_key
         self.cache = IdlearnCache()
 
@@ -66,21 +71,62 @@ class LLMModel:
                     subprocess.Popen(["ollama", "serve"])
         # Cloud APIs don't need a local server
 
-    def generate(self, prompt):
-        """Generates text using the configured LLM API."""
+    def generate(self, prompt, images=None):
+        """Generates text using the configured LLM API.
+
+        Args:
+            prompt: Text prompt to send to the LLM.
+            images: Optional list of image paths or base64-encoded strings
+                    for multimodal models. Each element can be:
+                    - A file path (str) to an image file
+                    - A base64-encoded string of image bytes
+        """
         if self.api_type == "ollama":
             try:
-                return self._generate_ollama(prompt)
+                return self._generate_ollama(prompt, images=images)
             except Exception as e:
                 logger.warning(f"Ollama package failed ({e}), falling back to requests-based Ollama API...")
-                return self._generate_ollama_requests(prompt)
+                # return self._generate_ollama_requests(prompt)
+                return None
         elif self.api_type == "openai":
-            return self._generate_openai(prompt)
+            return self._generate_openai(prompt, images=images)
         else:
             raise ValueError(f"Unsupported api_type: {self.api_type}")
 
-    def _generate_ollama(self, prompt):
-        """Generates text using the official Ollama Python package (Local or Cloud)."""
+    @staticmethod
+    def _prepare_images(images):
+        """Convert a list of image paths or raw bytes to base64-encoded strings.
+
+        Args:
+            images: List of file paths (str) or base64-encoded strings.
+
+        Returns:
+            List of base64-encoded strings suitable for the Ollama API.
+        """
+        if not images:
+            return []
+        result = []
+        for img in images:
+            if img is None:
+                continue
+            # If it looks like a file path, read and encode it
+            if isinstance(img, str) and os.path.isfile(img):
+                with open(img, "rb") as f:
+                    result.append(base64.b64encode(f.read()).decode("utf-8"))
+            elif isinstance(img, bytes):
+                result.append(base64.b64encode(img).decode("utf-8"))
+            else:
+                # Assume it's already a base64 string
+                result.append(img)
+        return result
+
+    def _generate_ollama(self, prompt, images=None):
+        """Generates text using the official Ollama Python package (Local or Cloud).
+
+        Args:
+            prompt: Text prompt.
+            images: Optional list of image paths or base64 strings for multimodal models.
+        """
         from ollama import Client
 
         clean_url = self._clean_base_url()
@@ -90,15 +136,22 @@ class LLMModel:
 
         client = Client(host=clean_url, headers=headers)
 
+        user_message = {
+            'role': 'user',
+            'content': prompt,
+        }
+
+        # Attach images if provided (multimodal models like gemma3, llava, etc.)
+        prepared_images = self._prepare_images(images)
+        if prepared_images:
+            user_message['images'] = prepared_images
+
         messages = [
             {
                 'role': 'system',
-                'content': "You are a helpful assistant that has insight in academic, theoretical knowledge in science and humanities, and that is able to accurately summarize complex texts concisely yet precisely without skipping important details, as well as generate insightful questions about these texts."
+                'content': "You are a helpful assistant that has insight in academic, theoretical knowledge in science and humanities, and that is able to accurately summarize complex texts in details without skipping important details, as well as generate insightful questions about these texts."
             },
-            {
-                'role': 'user',
-                'content': prompt
-            }
+            user_message,
         ]
 
         # Use stream=True and accumulate chunks for Ollama Cloud compatibility
@@ -109,34 +162,66 @@ class LLMModel:
 
         return full_response
 
-    def _generate_ollama_requests(self, prompt):
-        """Fallback: Generates text using the local Ollama REST API directly."""
-        url = f"{self._clean_base_url()}/api/generate"
+    def _generate_ollama_requests(self, prompt, images=None):
+        """Fallback: Generates text using the Ollama REST API directly."""
+        url = f"{self._clean_base_url()}/api/chat"
         headers = {}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+
+        user_message = {
+            "role": "user",
+            "content": prompt,
+        }
+
+        prepared_images = self._prepare_images(images)
+        if prepared_images:
+            user_message["images"] = prepared_images
 
         response = requests.post(
             url,
             json={
                 "model": self.model,
-                "prompt": prompt,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a helpful assistant that has insight in academic, theoretical knowledge in science and humanities, and that is able to accurately summarize complex texts concisely yet precisely without skipping important details, as well as generate insightful questions about these texts."
+                    },
+                    user_message,
+                ],
                 "stream": False,
-                "system": "You are a helpful assistant that has insight in academic, theoretical knowledge in science and humanities, and that is able to accurately summarize complex texts concisely yet precisely without skipping important details, as well as generate insightful questions about these texts.",
-                "temperature": self.temperature,
+                "options": {
+                    "temperature": self.temperature,
+                },
             },
             headers=headers
         )
         response.raise_for_status()
-        return response.json()["response"]
+        return response.json()["message"]["content"]
 
-    def _generate_openai(self, prompt):
-        """Generates text using an OpenAI-compatible Cloud API (e.g., Zed, OpenAI)."""
+    def _generate_openai(self, prompt, images=None):
+        """Generates text using an OpenAI-compatible Cloud API (e.g., Zed, OpenAI).
+
+        Supports multimodal (vision) models by sending images as base64 in the
+        OpenAI chat-completions image_url format.
+        """
         url = f"{self.base_url}/chat/completions"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}"
         }
+
+        # Build user message content — text-only or multimodal
+        user_content = [{"type": "text", "text": prompt}]
+        prepared_images = self._prepare_images(images)
+        for img_b64 in prepared_images:
+            user_content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{img_b64}"
+                }
+            })
+
         payload = {
             "model": self.model,
             "messages": [
@@ -146,7 +231,7 @@ class LLMModel:
                 },
                 {
                     "role": "user",
-                    "content": prompt
+                    "content": user_content if len(user_content) > 1 else prompt
                 }
             ],
             "temperature": self.temperature
@@ -186,7 +271,7 @@ class LLMModel:
             summaries = ""
             for p in parts:
                 s = self.generate(instruction.format(p))
-                summaries += s + " "
+                summaries += (s or "") + " "
             summary = self.summarize(summaries)
         else:
             return text
@@ -197,10 +282,10 @@ class LLMModel:
 
         for key in dtext.keys():
             # Create summary and bullet points of each main_text entry and store it in dsum
-            if key not in dtext.keys():
+            if key not in self.cache.data["summaries"]:
                 logger.info("--- Generating summary of section '{}'".format(key))
 
                 dtext[key] = self.generate(summary_instruct.format(text=dtext[key]))
                 self.cache.update_summary(key, dtext[key])
             else:
-                logger.warning("--- Summary of section '{}' already exists, skipping")
+                logger.warning("--- Summary of section '{}' already exists, skipping".format(key))

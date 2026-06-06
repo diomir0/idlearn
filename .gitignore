@@ -34,3 +34,6 @@ Thumbs.db
 # --- Environment / secrets -----------------
 .env
 .env.*
+
+# --- Output files --------------------------
+output/

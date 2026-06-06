@@ -1,0 +1,56 @@
+{
+  "id": "idlearn-academic",
+  "description": "Academic paper note enhanced with idlearn structured content extraction.",
+  "name": "Academic Paper (IDLEARN)",
+  "behavior": "create",
+  "noteNameFormat": "{{title}}",
+  "path": "Papers",
+  "noteContentFormat": "# {{title}}\n\n> [!info] Paper Metadata\n> **Author**: {{author}}\n> **Subject**: {{subject}}\n> **Keywords**: {{keywords}}\n> **Pages**: {{pageCount}}\n> **Created**: {{creationDate|date:\"YYYY-MM-DD\"}}\n\n{% if content %}\n## Content\n\n{{content}}\n{% endif %}",
+  "properties": [
+    {
+      "name": "title",
+      "value": "{{title}}",
+      "type": "text"
+    },
+    {
+      "name": "author",
+      "value": "{{author}}",
+      "type": "text"
+    },
+    {
+      "name": "year",
+      "value": "{{creationDate|date:\"YYYY\"}}",
+      "type": "text"
+    },
+    {
+      "name": "source",
+      "value": "{{filePath}}",
+      "type": "text"
+    },
+    {
+      "name": "pages",
+      "value": "{{pageCount}}",
+      "type": "number"
+    },
+    {
+      "name": "keywords",
+      "value": "{{keywords}}",
+      "type": "multitext"
+    },
+    {
+      "name": "subject",
+      "value": "{{subject}}",
+      "type": "text"
+    },
+    {
+      "name": "type",
+      "value": "paper",
+      "type": "text"
+    },
+    {
+      "name": "idlearn_processed",
+      "value": "true",
+      "type": "checkbox"
+    }
+  ]
+}

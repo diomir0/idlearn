@@ -1,0 +1,51 @@
+{
+  "id": "default-pdf",
+  "description": "Simple PDF note with title and full content.",
+  "name": "Default PDF Note",
+  "behavior": "create",
+  "noteNameFormat": "{{title}}",
+  "path": "PDFs",
+  "noteContentFormat": "# {{title}}\n\n{{content}}",
+  "properties": [
+    {
+      "name": "title",
+      "value": "{{title}}",
+      "type": "text"
+    },
+    {
+      "name": "author",
+      "value": "{{author}}",
+      "type": "text"
+    },
+    {
+      "name": "source",
+      "value": "{{filePath}}",
+      "type": "text"
+    },
+    {
+      "name": "pages",
+      "value": "{{pageCount}}",
+      "type": "number"
+    },
+    {
+      "name": "keywords",
+      "value": "{{keywords}}",
+      "type": "text"
+    },
+    {
+      "name": "subject",
+      "value": "{{subject}}",
+      "type": "text"
+    },
+    {
+      "name": "created",
+      "value": "{{creationDate|date:\"YYYY-MM-DD\"}}",
+      "type": "date"
+    },
+    {
+      "name": "type",
+      "value": "pdf",
+      "type": "text"
+    }
+  ]
+}

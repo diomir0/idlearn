@@ -1,0 +1,46 @@
+{
+  "id": "idlearn-study-notes",
+  "description": "Full study notes with sections, summaries, and Q&A from idlearn processing.",
+  "name": "Study Notes (IDLEARN)",
+  "behavior": "create",
+  "noteNameFormat": "{{title}} - Study Notes",
+  "path": "Study Notes",
+  "noteContentFormat": "# {{title}}\n\n> [!info] Document Info\n> **Author**: {{author}}\n> **Pages**: {{pageCount}}\n> **Keywords**: {{keywords}}\n> **Source**: {{fileName}}\n\n{% if sections %}\n## Sections\n\n{% for section in sections %}\n### {{section.title}}\n\n{{section.content}}\n\n{% endfor %}\n{% endif %}\n{% if summaries %}\n---\n\n## Summaries\n\n{% for summary in summaries %}\n### {{summary.title}}\n\n{{summary.summary}}\n\n{% endfor %}\n{% endif %}\n{% if qa_pairs %}\n---\n\n## Questions & Answers\n\n{% for qa in qa_pairs %}\n### {{qa.title}}\n\n{{qa.qa}}\n\n{% endfor %}\n{% endif %}",
+  "properties": [
+    {
+      "name": "title",
+      "value": "{{title}}",
+      "type": "text"
+    },
+    {
+      "name": "author",
+      "value": "{{author}}",
+      "type": "text"
+    },
+    {
+      "name": "pages",
+      "value": "{{pageCount}}",
+      "type": "number"
+    },
+    {
+      "name": "keywords",
+      "value": "{{keywords}}",
+      "type": "multitext"
+    },
+    {
+      "name": "source",
+      "value": "{{filePath}}",
+      "type": "text"
+    },
+    {
+      "name": "type",
+      "value": "study-notes",
+      "type": "text"
+    },
+    {
+      "name": "idlearn_processed",
+      "value": "true",
+      "type": "checkbox"
+    }
+  ]
+}

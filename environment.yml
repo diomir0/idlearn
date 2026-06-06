@@ -13,3 +13,4 @@ dependencies:
       - genanki
       - streamlit
       - ollama
+      - python-dateutil

@@ -9,11 +9,14 @@
 
 # This script defines the GUI class running the graphical interface of the Idlearn app.
 
+import os
 import threading
 import customtkinter as ctk
 import tkinter
+from tkinter import filedialog, messagebox
 from .pipeline import Pipeline
 from .utils import get_toc
+from .obsidize import list_templates, load_template, Template
 
 
 ctk.set_appearance_mode("dark")  # Options: "System" (default), "Dark", "Light"
@@ -104,13 +107,16 @@ class IdlearnApp(ctk.CTk):
         self.outfolder = None
         self.cards = ctk.StringVar(value="off")
         self.summarize = ctk.StringVar(value="on")
+        self.obsidian = ctk.StringVar(value="off")
+        self.obsidian_template_var = ctk.StringVar(value="idlearn-summary")
+        self.obsidian_vault_path = ctk.StringVar(value=os.path.expanduser("~/Documents/obsidian"))
 
         self.grid_columnconfigure(2, weight=1)
         self.grid_rowconfigure((0, 1, 2), weight=1)
 
         # Define basic info
         self.title("IDLEARN")
-        self.geometry("1024x400")
+        self.geometry("1024x500")
 
         # Create input file textbox
         self.textbox_input = ctk.CTkTextbox(self, width = 300, height = 30)
@@ -134,7 +140,7 @@ class IdlearnApp(ctk.CTk):
 
         # Create run button
         self.button_run = ctk.CTkButton(self, text="Run", command=self.make_run, corner_radius=24, hover =True)
-        self.button_run.grid(row=3, column=1, padx=20, pady=20)
+        self.button_run.grid(row=5, column=1, padx=20, pady=20)
 
         # Create checkbox for summarization
         self.summarize_checkbox = ctk.CTkCheckBox(self, text="Summarize", command=None, hover=True,
@@ -146,12 +152,77 @@ class IdlearnApp(ctk.CTk):
                                         variable=self.cards, onvalue="on", offvalue="off")
         self.checkbox.grid(row=3, column=0, padx=20, pady=(0,0))
 
+        # --- Obsidian export section ---
+        self.obsidian_checkbox = ctk.CTkCheckBox(
+            self, text="Export to Obsidian",
+            command=self._toggle_obsidian_options,
+            hover=True,
+            variable=self.obsidian, onvalue="on", offvalue="off",
+        )
+        self.obsidian_checkbox.grid(row=4, column=0, padx=20, pady=(0,0))
+
+        # Obsidian options frame (conditionally shown)
+        self.obsidian_options_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.obsidian_options_frame.grid(row=4, column=1, padx=10, pady=(0,0), sticky='ew')
+        self.obsidian_options_frame.grid_columnconfigure(0, weight=1)
+
+        # Template selector
+        available_templates = list_templates()
+        # Use template ids as dropdown values (load_template resolves by id/key)
+        template_ids = [t['id'] for t in available_templates]
+        # Ensure idlearn-study-notes is present as default
+        if 'idlearn-study-notes' not in template_ids:
+            template_ids.insert(0, 'idlearn-study-notes')
+
+        self.obsidian_template_label = ctk.CTkLabel(self.obsidian_options_frame, text="Template:", anchor='w')
+        self.obsidian_template_label.grid(row=0, column=0, padx=(0,5), sticky='w')
+
+        self.obsidian_template_menu = ctk.CTkOptionMenu(
+            self.obsidian_options_frame, values=template_ids,
+            variable=self.obsidian_template_var,
+        )
+        self.obsidian_template_menu.grid(row=0, column=1, padx=5, sticky='ew')
+
+        # Obsidian vault path
+        self.obsidian_vault_label = ctk.CTkLabel(self.obsidian_options_frame, text="Vault:", anchor='w')
+        self.obsidian_vault_label.grid(row=1, column=0, padx=(0,5), sticky='w')
+
+        self.obsidian_vault_entry = ctk.CTkEntry(
+            self.obsidian_options_frame,
+            textvariable=self.obsidian_vault_path,
+            placeholder_text="Path to Obsidian vault (optional)",
+        )
+        self.obsidian_vault_entry.grid(row=1, column=1, padx=5, sticky='ew')
+
+        self.obsidian_vault_button = ctk.CTkButton(
+            self.obsidian_options_frame, text="Browse",
+            command=self._browse_vault,
+            width=70,
+        )
+        self.obsidian_vault_button.grid(row=1, column=2, padx=5)
+
+        # Initially hide the options frame
+        self._toggle_obsidian_options()
+
         # Create metadata frame
         self.metadata_frame = MetadataFrame(self, title="File Metadata")
         self.metadata_frame.grid(row=0, column=2, padx=10, pady=(10, 10), sticky='ewns', rowspan=3)
 
         # Define top-level window
         self.toplevel_window = None
+
+    def _toggle_obsidian_options(self):
+        """Show or hide the Obsidian template/vault options based on the checkbox."""
+        if self.obsidian.get() == "on":
+            self.obsidian_options_frame.grid()
+        else:
+            self.obsidian_options_frame.grid_remove()
+
+    def _browse_vault(self):
+        """Open a folder picker for the Obsidian vault path."""
+        vault = filedialog.askdirectory(title="Select Obsidian Vault Folder")
+        if vault:
+            self.obsidian_vault_path.set(vault)
 
 
     def make_openfile(self):
@@ -183,7 +254,30 @@ class IdlearnApp(ctk.CTk):
                 def run_pipeline():
                     try:
                         summarize = self.summarize.get() == "on"
-                        self.pipeline.run(self.metadata_frame.sections, summarize=summarize)
+                        results = self.pipeline.run(self.metadata_frame.sections, summarize=summarize)
+
+                        # Obsidian export if enabled
+                        if self.obsidian.get() == "on":
+                            try:
+                                vault_path = self.obsidian_vault_path.get().strip() or None
+                                obs_result = self.pipeline.export_obsidian(
+                                    template=self.obsidian_template_var.get(),
+                                    dtext=results[0] if results else None,
+                                    dsum=results[2] if results and summarize else None,
+                                    dqa=results[3] if results and summarize else None,
+                                    output_folder=vault_path,
+                                )
+                                # Show success on the main thread
+                                self.after(0, lambda: messagebox.showinfo(
+                                    "Obsidian Export",
+                                    f"Note exported: {obs_result.note_name}.md"
+                                ))
+                            except Exception as e:
+                                # Show error on the main thread
+                                self.after(0, lambda err=e: messagebox.showerror(
+                                    "Obsidian Export Error",
+                                    f"Failed to export to Obsidian:\n{err}"
+                                ))
                     finally:
                         # Re-enable run button on the main thread after completion
                         self.after(0, lambda: self.button_run.configure(state="normal"))

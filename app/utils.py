@@ -17,10 +17,42 @@ import re
 from collections import Counter
 
 
+def _normalize_toc_hierarchy(raw_toc):
+    """Normalize TOC levels into a valid PyMuPDF hierarchy.
+
+    PyMuPDF requires:
+      - The first item must have level 1.
+      - No item may skip levels: level[n] <= level[n-1] + 1.
+
+    Two passes:
+      1. Shift so the minimum level becomes 1.
+      2. Cap every level to be at most previous_level + 1.
+    """
+    if not raw_toc:
+        return raw_toc
+
+    # Pass 1 – shift so the minimum level is 1
+    min_level = min(item[0] for item in raw_toc)
+    if min_level != 1:
+        shift = min_level - 1
+        for item in raw_toc:
+            item[0] -= shift
+
+    # Pass 2 – enforce no-skip rule
+    raw_toc[0][0] = max(raw_toc[0][0], 1)  # first item must be level 1
+    for i in range(1, len(raw_toc)):
+        max_allowed = raw_toc[i - 1][0] + 1
+        if raw_toc[i][0] > max_allowed:
+            raw_toc[i][0] = max_allowed
+
+    return raw_toc
+
+
 def get_toc(doc):
     """
     Extracts and cleans the Table of Contents from a document.
-    If the built-in ToC is missing, it uses TOCExtractor as a fallback.
+    If the built-in ToC is missing or empty, it uses TOCExtractor as a fallback,
+    passing the already-opened document directly (no re-opening from file path).
     Returns a list of tuples: (level, title, start_page, end_page)
     """
     from .toc_extractor import TOCExtractor
@@ -33,33 +65,30 @@ def get_toc(doc):
     # Fallback to TOCExtractor if built-in TOC is missing or empty
     if raw_toc is None or all([len(s) < 2 or s[1] == "" for s in raw_toc]):
         toc_extractor = TOCExtractor()
-        # Use metadata location or filename as path
-        location = doc.metadata.get("location", "") or doc.name
+        try:
+            # Use the already-opened document directly instead of re-opening from path
+            extracted = toc_extractor.extract_toc_from_doc(doc)
 
-        # Ensure location is a valid, non-empty string before calling extractor
-        if not location or not isinstance(location, str):
+            # Convert TOCEntry objects to [level, title, page] format
+            raw_toc = [[e.level, e.title, e.page or 1] for e in extracted]
+
+            # Normalize levels into a valid PyMuPDF hierarchy
+            if raw_toc:
+                _normalize_toc_hierarchy(raw_toc)
+
+                try:
+                    doc.set_toc(raw_toc)
+                    doc.save()
+                except Exception as e:
+                    from .logger import logger
+                    logger.warning(
+                        f"Could not persist inferred TOC back into document: {e}"
+                    )
+        except Exception as e:
+            from .logger import logger
+            logger.error(f"Failed to extract or save inferred TOC: {e}", exc_info=True)
+            # Fallback to an empty list if extraction fails
             raw_toc = []
-        else:
-            try:
-                extracted = toc_extractor.extract_toc(location)
-                # Convert TOCEntry objects to [level, title, page] format
-                raw_toc = [[e.level, e.title, e.page or 1] for e in extracted]
-
-                # Normalize levels to be consecutive (1, 2, 3...) and start at 1
-                # PyMuPDF requires strict hierarchy with no gaps
-                if raw_toc:
-                    unique_levels = sorted(list(set(item[0] for item in raw_toc)))
-                    level_map = {old_level: new_level for new_level, old_level in enumerate(unique_levels, start=1)}
-                    for item in raw_toc:
-                        item[0] = level_map[item[0]]
-
-                doc.set_toc(raw_toc)
-                doc.save()
-            except Exception as e:
-                from .logger import logger
-                logger.error(f"Failed to extract or save inferred TOC: {e}", exc_info=True)
-                # Fallback to an empty list if extraction fails
-                raw_toc = []
 
     toc_with_end = []
     for i, item in enumerate(raw_toc):
