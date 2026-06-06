@@ -133,15 +133,60 @@ class KnowledgeGraph:
         Returns:
             A string containing a Mermaid ``graph TD`` block.
         """
+        import re as _re
+
+        # Mermaid numeric character references for special characters.
+        # Using #NN; (Mermaid-native) instead of HTML entities (&amp; etc.)
+        # avoids double-encoding when the output is later HTML-escaped
+        # by render_mermaid().
+        _MERMAID_CHAR_REFS = {
+            '&': '#38;',
+            '<': '#60;',
+            '>': '#62;',
+            '#': '#35;',
+        }
+
+        def _mermaid_safe(text: str) -> str:
+            """Sanitize text for use inside Mermaid labels.
+
+            Uses Mermaid numeric character references (#NN;) so the
+            output is valid Mermaid source that survives HTML-escaping.
+            Semicolons and newlines are removed FIRST to avoid destroying
+            the trailing semicolons that character references require.
+            """
+            # 1. Remove newlines and semicolons FIRST — before we
+            #    introduce character references that end with semicolons
+            text = text.replace('\n', ' ').replace('\r', '')
+            text = text.replace(';', ' ')
+            # 2. Replace double quotes with single quotes
+            text = text.replace('"', "'")
+            # 3. Strip characters that break Mermaid syntax
+            text = _re.sub(r'[()\[\]{}|]', '', text)
+            # 4. Single-pass replacement for chars with Mermaid meaning
+            #    (order doesn't matter — regex scans the original string)
+            text = _re.sub(r'[&<>#]', lambda m: _MERMAID_CHAR_REFS[m.group()], text)
+            return text.strip()
+
         lines = ["graph TD"]
-        for c in self.concepts:
-            # Sanitize node IDs for Mermaid
+        for i, c in enumerate(self.concepts):
             node_id = c.id.replace(" ", "_").replace("-", "_")
-            lines.append(f"    {node_id}[\"{c.label}\"]")
+            node_id = _re.sub(r'[^A-Za-z0-9_]', '', node_id)
+            if not node_id:
+                node_id = f"node_{i}"  # fallback for empty IDs after sanitization
+            safe_label = _mermaid_safe(c.label) or "(unnamed)"  # empty label breaks Mermaid
+            lines.append(f'    {node_id}["{safe_label}"]')
         for r in self.relations:
-            src = r.source.replace(" ", "_").replace("-", "_")
-            tgt = r.target.replace(" ", "_").replace("-", "_")
-            lines.append(f"    {src} -->|\"{r.label}\"| {tgt}")
+            src = _re.sub(r'[^A-Za-z0-9_]', '', r.source.replace(" ", "_").replace("-", "_"))
+            tgt = _re.sub(r'[^A-Za-z0-9_]', '', r.target.replace(" ", "_").replace("-", "_"))
+            if not src or not tgt:
+                continue  # skip edges with empty endpoints after sanitization
+            if src == tgt:
+                continue  # self-loops crash Mermaid's edge router
+            safe_rel = _mermaid_safe(r.label)
+            if safe_rel:
+                lines.append(f'    {src} -->|{safe_rel}| {tgt}')
+            else:
+                lines.append(f'    {src} --> {tgt}')  # empty label breaks pipe syntax
         return "\n".join(lines)
 
     def to_obsidian_canvas(self) -> str:

@@ -1,87 +1,29 @@
 import os
 import re
 import streamlit as st
-import streamlit.components.v1 as components
 import tempfile
 import traceback
 from app.pipeline import Pipeline
 from app.utils import get_toc, flatten_text
 from app.obsidize import list_templates, load_template, load_template_from_string
+from app.ui import (
+    THEMES,
+    generate_theme_css,
+    render_welcome_screen,
+    render_anki_card_html,
+    render_mermaid,
+    render_kg_stats,
+    section_card_html,
+)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Page configuration
+# Page configuration (must be first Streamlit call)
 # ──────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="IDLEARN — Study Smarter",
     page_icon="🧠",
     layout="wide",
 )
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Custom CSS
-# ──────────────────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-/* ── Global ── */
-.main .block-container { padding-top: 1.5rem; max-width: 1100px; }
-
-/* ── Anki Card ── */
-.anki-card {
-    background: linear-gradient(135deg, #1e1e2e 0%, #2a2a3d 100%);
-    border: 1px solid #3b3b5c;
-    border-radius: 16px;
-    padding: 2rem 2.2rem;
-    min-height: 260px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    position: relative;
-    transition: box-shadow 0.2s;
-}
-.anki-card:hover { box-shadow: 0 0 24px rgba(120, 120, 255, 0.15); }
-.anki-card-num {
-    position: absolute;
-    top: 12px; left: 18px;
-    font-size: 0.75rem;
-    color: #7f7fa8;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-}
-.anki-card-type {
-    position: absolute;
-    top: 12px; right: 18px;
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    padding: 2px 10px;
-    border-radius: 999px;
-    font-weight: 700;
-}
-.type-basic  { background: #2d4a3e; color: #6ee7b7; }
-.type-cloze  { background: #3d2d4a; color: #c4b5fd; }
-.anki-question {
-    font-size: 1.15rem;
-    color: #e0e0f0;
-    font-weight: 500;
-    line-height: 1.6;
-}
-.anki-answer {
-    margin-top: 1.2rem;
-    padding-top: 1rem;
-    border-top: 1px solid #3b3b5c;
-    font-size: 1.05rem;
-    color: #a5f3c4;
-    line-height: 1.6;
-}
-.anki-empty {
-    text-align: center;
-    color: #6b6b8a;
-    padding: 3rem;
-    font-size: 1rem;
-}
-
-</style>
-""", unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Session state
@@ -94,14 +36,21 @@ if "card_index" not in st.session_state:
     st.session_state.card_index = 0
 if "show_answer" not in st.session_state:
     st.session_state.show_answer = False
-# Persist knowledge graph and section_images across reruns
 if "knowledge_graph" not in st.session_state:
     st.session_state.knowledge_graph = None
 if "section_images" not in st.session_state:
     st.session_state.section_images = {}
+if "theme" not in st.session_state:
+    st.session_state.theme = "ink_amber"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Helpers
+# Theme injection — regenerate CSS on every rerun so theme switches take effect
+# ──────────────────────────────────────────────────────────────────────────────
+theme_css = generate_theme_css(st.session_state.theme)
+st.markdown(f"<style>{theme_css}</style>", unsafe_allow_html=True)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers (data processing only — rendering is in app/ui.py)
 # ──────────────────────────────────────────────────────────────────────────────
 
 def parse_qa_pairs(dqa: dict) -> list[dict]:
@@ -130,50 +79,18 @@ def parse_qa_pairs(dqa: dict) -> list[dict]:
     return cards
 
 
-def render_anki_card_html(card: dict, index: int, total: int, show_answer: bool) -> str:
-    """Render a single Anki card as styled HTML."""
-    card_type_label = "Cloze" if card["is_cloze"] else "Basic"
-    card_type_class = "type-cloze" if card["is_cloze"] else "type-basic"
-
-    answer_html = ""
-    if show_answer:
-        answer_html = f'<div class="anki-answer">{card["answer"]}</div>'
-
-    return f"""
-    <div class="anki-card">
-        <span class="anki-card-num">Card {index + 1} / {total} — {card["section"]}</span>
-        <span class="anki-card-type {card_type_class}">{card_type_label}</span>
-        <div class="anki-question">{card["question"]}</div>
-        {answer_html}
-    </div>
-    """
-
-
 def split_summary_and_figures(summary_text: str) -> tuple[str, list[str]]:
-    """Split summary text into main content and figure descriptions.
-
-    The LLM produces summaries with a '## Figures' (or '### Figures') section
-    containing lines like:
-        - **Figure 1**: Description here
-    This function separates them so descriptions can be used as image captions.
-
-    Returns:
-        (main_text, figure_captions) — main_text has the figures section stripped,
-        figure_captions is a list of description strings (one per figure).
-    """
-    # Split at the Figures heading (any level: ## or ### or just 'Figures')
+    """Split summary text into main content and figure descriptions."""
     parts = re.split(r"^#{1,4}\s+Figures?\s*$", summary_text, flags=re.MULTILINE)
     main_text = parts[0].rstrip()
 
     figure_captions = []
     if len(parts) > 1:
         figures_section = parts[1]
-        # Parse lines like "- **Figure X**: Description" or "- Description"
         for line in figures_section.strip().splitlines():
             line = line.strip()
-            if not line or line.startswith("#"):  # skip empty or nested headers
+            if not line or line.startswith("#"):
                 continue
-            # Remove leading bullet and bold figure label
             cleaned = re.sub(r"^[-*]\s+\*\*[^*]*\*\*\s*:?\s*", "", line)
             if cleaned:
                 figure_captions.append(cleaned)
@@ -181,62 +98,15 @@ def split_summary_and_figures(summary_text: str) -> tuple[str, list[str]]:
     return main_text, figure_captions
 
 
-def render_mermaid(mermaid_code: str, height: int = 500) -> None:
-    """Render a Mermaid diagram as an interactive HTML component.
-
-    Streamlit's st.markdown cannot render Mermaid diagrams — it just shows
-    the raw code block. This function uses an HTML iframe with the
-    Mermaid.js library loaded from CDN to produce a real rendered graph.
-    """
-    import html as _html
-    safe_code = _html.escape(mermaid_code, quote=True)
-    html_doc = """<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
-  <style>
-    body {{
-      margin: 0; padding: 1rem;
-      background: transparent;
-      font-family: sans-serif;
-    }}
-    .mermaid {{
-      display: flex;
-      justify-content: center;
-    }}
-  </style>
-</head>
-<body>
-  <pre class="mermaid">{safe_code}</pre>
-  <script>
-    mermaid.initialize({{
-      startOnLoad: true,
-      theme: 'default',
-      securityLevel: 'loose',
-      flowchart: {{ useMaxWidth: true, htmlLabels: true, curve: 'basis' }}
-    }});
-  </script>
-</body>
-</html>""".format(safe_code=safe_code)
-    components.html(html_doc, height=height, scrolling=True)
-
-
 def build_toc_tree(toc: list) -> list[dict]:
-    """Convert a flat ToC list into a nested tree structure.
-
-    Returns a list of dicts with 'section', 'level', and 'children'.
-    Only top-level (level 1) items are at the root; deeper items are
-    nested inside their parent.
-    """
+    """Convert a flat ToC list into a nested tree structure."""
     tree = []
-    stack = []  # (level, node) — tracks the current ancestry
+    stack = []
 
     for sec in toc:
         level, title, start_page, end_page = sec
         node = {"section": sec, "level": level, "children": []}
 
-        # Pop stack until we find a parent whose level is strictly less
         while stack and stack[-1][0] >= level:
             stack.pop()
 
@@ -251,10 +121,39 @@ def build_toc_tree(toc: list) -> list[dict]:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Sidebar — control panel
+# Sidebar — brand, theme, controls
 # ──────────────────────────────────────────────────────────────────────────────
-st.sidebar.title("⚙️ IDLEARN Controls")
-st.sidebar.markdown("Configure your extraction and summarization settings.")
+
+# ── Brand header ──
+theme = THEMES[st.session_state.theme]
+st.sidebar.markdown(
+    f"""
+    <div class="il-brand">
+        <span class="il-brand-name">idlearn</span><span class="il-brand-dot">.</span>
+    </div>
+    <div class="il-brand-tagline">Study Smarter, Not Harder</div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ── Theme switcher ──
+theme_options = list(THEMES.keys())
+theme_labels = [f"{THEMES[k]['icon']} {THEMES[k]['name']}" for k in theme_options]
+selected_idx = theme_options.index(st.session_state.theme)
+selected_label = st.sidebar.selectbox(
+    "Theme",
+    options=theme_labels,
+    index=selected_idx,
+    key="theme_selector",
+)
+# Update session state if theme changed
+new_theme_key = theme_options[theme_labels.index(selected_label)]
+if new_theme_key != st.session_state.theme:
+    st.session_state.theme = new_theme_key
+    st.rerun()
+
+# ── Section: File ──
+st.sidebar.markdown('<div class="il-sidebar-section">File</div>', unsafe_allow_html=True)
 
 uploaded_file = st.sidebar.file_uploader("Upload PDF or EPUB", type=["pdf", "epub"])
 
@@ -265,6 +164,9 @@ output_folder = st.sidebar.text_input(
 )
 
 st.sidebar.markdown("---")
+
+# ── Section: Processing ──
+st.sidebar.markdown('<div class="il-sidebar-section">Processing</div>', unsafe_allow_html=True)
 
 summarize_toggle = st.sidebar.checkbox("Summarize Selected Sections", value=True)
 anki_toggle = st.sidebar.checkbox("Generate Anki Cards", value=False)
@@ -334,9 +236,9 @@ if obsidian_toggle:
         except Exception as e:
             st.sidebar.error(f"Invalid template: {e}")
 
-# ── LLM provider settings ──
+# ── Section: LLM ──
 if summarize_toggle:
-    st.sidebar.markdown("#### 🤖 LLM Provider")
+    st.sidebar.markdown('<div class="il-sidebar-section">LLM Provider</div>', unsafe_allow_html=True)
     api_type = st.sidebar.radio(
         "Select Provider",
         ("Ollama (Local/Cloud)", "OpenAI (Cloud)"),
@@ -368,8 +270,6 @@ if uploaded_file:
         tmp.write(uploaded_file.read())
         tmp_path = tmp.name
 
-    # Only create a new Pipeline if one doesn't exist for this file,
-    # so that we don't lose knowledge_graph / section_images on reruns.
     if st.session_state.pipeline is None:
         st.session_state.pipeline = Pipeline(
             tmp_path,
@@ -384,8 +284,8 @@ if uploaded_file:
 
     toc = get_toc(pipeline.doc)
 
-    # ── Foldable ToC with expanders ──
-    st.sidebar.markdown("### 📖 Select Sections")
+    # ── ToC section selection ──
+    st.sidebar.markdown('<div class="il-sidebar-section">Sections</div>', unsafe_allow_html=True)
     selected_sections = []
     toc_tree = build_toc_tree(toc)
 
@@ -411,16 +311,12 @@ if uploaded_file:
     st.sidebar.markdown("---")
 
     if st.sidebar.button("🚀 Start Processing", use_container_width=True):
-        # Reset card state for a new run
         st.session_state.card_index = 0
         st.session_state.show_answer = False
         with st.spinner("Processing document… This may take a while for large files."):
             try:
                 results = pipeline.run(selected_sections, summarize=summarize_toggle)
                 st.session_state.results = results
-                # Persist knowledge graph & section_images in session state
-                # so they survive Streamlit reruns (the Pipeline object itself
-                # is stable now since we don't recreate it on every rerun).
                 if hasattr(pipeline, "knowledge_graph") and pipeline.knowledge_graph:
                     st.session_state.knowledge_graph = pipeline.knowledge_graph
                 if hasattr(pipeline, "section_images"):
@@ -465,20 +361,18 @@ if st.session_state.results:
 
     # ── Tabs: Summary | Anki Cards | Knowledge Graph ──
     tab_summary, tab_cards, tab_graph = st.tabs(
-        ["📝 Summary", "🃏 Anki Cards", "🕸️ Knowledge Graph"]
+        ["📋 Summary", "🃏 Anki Cards", "🕸️ Knowledge Graph"]
     )
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # TAB 1 — Summary (with inline images)
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     with tab_summary:
         if dsum:
             for section_title, summary_text in dsum.items():
                 with st.expander(f"📋 {section_title}", expanded=True):
                     main_text, figure_captions = split_summary_and_figures(summary_text)
                     st.markdown(main_text)
-                    # Display extracted images for this section with captions
-                    # Two images per row to keep them reasonably sized
                     imgs = section_images.get(section_title, [])
                     if imgs:
                         for i in range(0, len(imgs), 2):
@@ -492,8 +386,6 @@ if st.session_state.results:
                                             st.image(imgs[img_idx], caption=caption)
                                         else:
                                             st.caption(f"⚠️ Image not found: {os.path.basename(imgs[img_idx])}")
-                        # If there are leftover figure descriptions with no matching image,
-                        # show them as plain text below
                         leftover = figure_captions[len(imgs):]
                         if leftover:
                             st.markdown("**Additional figure notes:**")
@@ -502,9 +394,9 @@ if st.session_state.results:
         else:
             st.info("No summaries generated. Enable summarization in the sidebar.")
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # TAB 2 — Anki Card Viewer
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     with tab_cards:
         cards = parse_qa_pairs(dqa) if dqa else []
 
@@ -567,23 +459,21 @@ if st.session_state.results:
                         filtered = [c for c in cards if c["section"] == filter_section]
                         st.metric("Cards in section", len(filtered))
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # TAB 3 — Knowledge Graph
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     with tab_graph:
-        # Use the knowledge graph persisted in session state
         kg = st.session_state.knowledge_graph
 
         if kg and kg.concepts:
-            st.subheader(f"🕸️ {kg.title or 'Knowledge Graph'}")
-            st.caption(
-                f"{len(kg.concepts)} concepts · {len(kg.relations)} relationships"
+            st.markdown(
+                render_kg_stats(len(kg.concepts), len(kg.relations), kg.title or "Knowledge Graph"),
+                unsafe_allow_html=True,
             )
 
             # ── Mermaid visualization ──
-            mermaid_code = kg.to_mermaid()
             st.markdown("### Graph Visualization")
-            render_mermaid(mermaid_code)
+            render_mermaid(kg.to_mermaid())
 
             # ── Concept table ──
             st.markdown("### Concepts")
@@ -639,14 +529,5 @@ if st.session_state.results:
             )
 
 else:
-    # ── Empty state ──
-    st.markdown("""
-    <div style="text-align: center; margin-top: 5rem;">
-        <h1>Welcome to IDLEARN 🧠</h1>
-        <p style="font-size: 1.2rem; color: gray;">
-            Upload a PDF or EPUB in the sidebar, select sections, and click
-            <b>Start Processing</b> to generate summaries, Anki flashcards,
-            and a knowledge graph.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    # ── Empty state: welcome screen ──
+    st.markdown(render_welcome_screen(), unsafe_allow_html=True)
